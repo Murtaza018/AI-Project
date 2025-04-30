@@ -14,7 +14,7 @@ BOARD_HEIGHT_RATIO = 0.7
 BOARD_HEIGHT = int(HEIGHT * BOARD_HEIGHT_RATIO)
 CELL_HEIGHT = BOARD_HEIGHT // ROWS
 screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN)
-pygame.display.set_caption("UNO Game Board")
+pygame.display.set_caption("Game Board")
 
 # Define color palette with more vibrant colors
 COLORS = {
@@ -162,6 +162,49 @@ def draw_card(x, y, color, label, selected=False, clickable=False):
     
     return pygame.Rect(x, y, 84, 124)  # Return the card's rect for click detection
 
+# Draw the deck of cards (face down)
+def draw_deck(x, y, clickable=True):
+    # Draw multiple stacked cards to give depth
+    for i in range(3):
+        offset = i * 3
+        # Shadow
+        pygame.draw.rect(screen, (50, 50, 50, 100), 
+                       (x+3+offset, y+3-offset, 84, 124), 
+                       border_radius=14)
+        
+        # Card back
+        pygame.draw.rect(screen, (50, 50, 150), 
+                       (x+offset, y-offset, 84, 124), 
+                       border_radius=14)
+        
+        # Card border
+        pygame.draw.rect(screen, (0, 0, 0), 
+                       (x+offset, y-offset, 84, 124), 
+                       2, border_radius=14)
+        
+        # UNO logo on back
+        if i == 2:  # Only on top card
+            pygame.draw.ellipse(screen, (200, 50, 50), (x+12+offset, y+30-offset, 60, 80))
+            pygame.draw.ellipse(screen, (0, 0, 0), (x+12+offset, y+30-offset, 60, 80), 2)
+            text = card_font.render("UNO", True, (255, 255, 255))
+            text_rect = text.get_rect(center=(x+42+offset, y+70-offset))
+            screen.blit(text, text_rect)
+    
+    # Pulsating highlight if clickable and deck not empty
+    if clickable and len(deck) > 0:
+        pulse = (math.sin(pygame.time.get_ticks() * 0.005) + 1) / 2  # 0 to 1
+        highlight_color = (255, 255, 255)
+        border_width = int(2 + pulse * 2)
+        pygame.draw.rect(screen, highlight_color, 
+                       (x+6-2, y-6-2, 88, 128), 
+                       border_width, border_radius=16)
+    
+    # Display deck count
+    count_text = index_font.render(f"{len(deck)} cards", True, (255, 255, 255))
+    screen.blit(count_text, (x + 42 - count_text.get_width() // 2, y + 130))
+    
+    return pygame.Rect(x+6, y-6, 84, 124)  # Return the top card's rect for click detection
+
 # Draw a prettier player piece
 def draw_player(player_name, row, col, offset=(0, 0)):
     # Calculate center position of the cell
@@ -253,7 +296,6 @@ def apply_card_effect(card, player_idx):
         message = f"{active_players[next_player_idx]} turn skipped!"
     
     elif card["label"] == "Reverse":
-        game_direction
         game_direction *= -1
         message = "Direction reversed!"
     
@@ -262,16 +304,19 @@ def apply_card_effect(card, player_idx):
         draw_count = int(card["label"].split()[1])
         next_player = active_players[next_player_idx]
         
-        # Black Draw cards move backward
-        if card["color"] == "Black":
-            players[next_player]["pos"] = max(1, players[next_player]["pos"] - draw_count)
-            message = f"{next_player} moves back {draw_count} steps!"
-        else:
-            # For colored Draw cards, the next player draws that many cards
+        # Draw cards make the next player move backward (whether colored or black)
+        players[next_player]["pos"] = max(1, players[next_player]["pos"] - draw_count)
+        # Update target position immediately
+        row, col = get_row_col_from_pos(players[next_player]["pos"])
+        players[next_player]["target_pos"] = (row, col)
+        message = f"{next_player} moves back {draw_count} steps!"
+        
+        # For colored Draw cards, the next player also draws cards
+        if card["color"] != "Black":
             for _ in range(min(draw_count, len(deck))):
                 if deck:
                     player_hands[next_player].append(deck.pop())
-            message = f"{next_player} draws {draw_count} cards!"
+            message += f" and draws {draw_count} cards!"
     
     # Make sure position is within bounds
     players[active_players[player_idx]]["pos"] = max(1, min(players[active_players[player_idx]]["pos"], ROWS * COLS))
@@ -348,6 +393,30 @@ def play_card(card_idx):
     else:
         message = "Can't play that card!"
         message_timer = 120  # Show message for 2 seconds
+
+# Draw a card from the deck for the current player
+def draw_from_deck():
+    global message, message_timer
+    
+    if len(deck) > 0:
+        # Add animation for drawing (could be implemented later)
+        
+        # Add card to player's hand
+        new_card = deck.pop()
+        player_hands[current_player].append(new_card)
+        
+        message = f"{current_player} draws a card"
+        message_timer = 120
+        
+        # Check if the drawn card can be played
+        if can_play_card(new_card):
+            message += " - you can play it!"
+        else:
+            # If card can't be played, advance turn
+            advance_turn()
+    else:
+        message = "Deck is empty!"
+        message_timer = 120
 
 # Game loop
 running = True
@@ -427,9 +496,10 @@ while running:
     hand_bg_y = BOARD_HEIGHT + board_y_offset + 20
     hand_bg_height = HEIGHT - hand_bg_y - 20
     
-    # Split the bottom area into two sections: hand and current card
-    hand_width = WIDTH * 0.75
-    current_card_width = WIDTH * 0.25
+    # Redistribute space for hand area, current card, and draw deck
+    hand_width = WIDTH * 0.65  # Reduced to make room for deck
+    card_area_width = WIDTH * 0.20
+    deck_area_width = WIDTH * 0.15
     
     # Player hand background
     pygame.draw.rect(screen, (220, 220, 230), 
@@ -443,8 +513,8 @@ while running:
     # Player hand cards
     hand_y = hand_bg_y + 40
     current_hand = player_hands[current_player]
-    card_spacing = min(90, (hand_width - 100) // len(current_hand)) if current_hand else 90
-    start_x = ((hand_width - 10) - ((len(current_hand) - 1) * card_spacing + 84)) // 2
+    card_spacing = min(90, (hand_width - 100) // max(len(current_hand), 1)) if current_hand else 90
+    start_x = ((hand_width - 10) - ((len(current_hand) - 1) * card_spacing + 84)) // 2 if current_hand else (hand_width - 10) // 2 - 42
     
     card_rects = []
     for i, card in enumerate(current_hand):
@@ -460,13 +530,28 @@ while running:
     
     # Draw the current card panel
     pygame.draw.rect(screen, (220, 220, 230), 
-                   (current_card_x, current_card_y, current_card_width - 20, hand_bg_height), 
+                   (current_card_x, current_card_y, card_area_width - 10, hand_bg_height), 
                    border_radius=10)
     
     # Current card label
     label = index_font.render("Current Card", True, (0, 0, 0))
-    label_x = current_card_x + (current_card_width - 20) / 2 - label.get_width() / 2
+    label_x = current_card_x + (card_area_width - 10) / 2 - label.get_width() / 2
     screen.blit(label, (label_x, hand_bg_y + 10))
+    
+    # Draw deck panel
+    deck_x = hand_width + card_area_width - 10
+    deck_y = hand_bg_y
+    pygame.draw.rect(screen, (220, 220, 230), 
+                   (deck_x, deck_y, deck_area_width - 10, hand_bg_height), 
+                   border_radius=10)
+    
+    # Deck label
+    deck_label = index_font.render("Draw Deck", True, (0, 0, 0))
+    deck_label_x = deck_x + (deck_area_width - 10) / 2 - deck_label.get_width() / 2
+    screen.blit(deck_label, (deck_label_x, hand_bg_y + 10))
+    
+    # Draw the draw deck
+    deck_rect = draw_deck(deck_x + (deck_area_width - 10) / 2 - 42, hand_y, clickable=True)
     
     # Draw the current card (with animation if active)
     if move_animation and time.time() - animation_start_time < animation_duration:
@@ -478,7 +563,7 @@ while running:
         start_y = hand_y
         
         # End position (current card position)
-        end_x = current_card_x + (current_card_width - 20) / 2 - 42
+        end_x = current_card_x + (card_area_width - 10) / 2 - 42
         end_y = hand_y
         
         # Calculate current position
@@ -493,7 +578,7 @@ while running:
             move_animation = False
     else:
         # Draw the regular current card
-        card_x = current_card_x + (current_card_width - 20) / 2 - 42  # Center the card
+        card_x = current_card_x + (card_area_width - 10) / 2 - 42  # Center the card
         draw_card(card_x, hand_y, current_card["color"], current_card["label"])
     
     # Display message if timer is active
@@ -525,6 +610,10 @@ while running:
                         message = "Can't play that card!"
                         message_timer = 60
                     break
+            
+            # Check if player clicked on the draw deck
+            if deck_rect.collidepoint(event.pos) and len(deck) > 0:
+                draw_from_deck()
         
         elif event.type == pygame.KEYDOWN:
             # Manual controls for testing
@@ -534,17 +623,16 @@ while running:
                     selected_card = -1
             
             elif event.key == pygame.K_LEFT:
-                selected_card = max(selected_card - 1, 0) if selected_card > 0 else len(current_hand) - 1
+                if len(current_hand) > 0:
+                    selected_card = max(selected_card - 1, 0) if selected_card > 0 else len(current_hand) - 1
             
             elif event.key == pygame.K_RIGHT:
-                selected_card = (selected_card + 1) % len(current_hand)
+                if len(current_hand) > 0:
+                    selected_card = (selected_card + 1) % len(current_hand)
             
             # Test draws
             elif event.key == pygame.K_d:
-                if deck:
-                    player_hands[current_player].append(deck.pop())
-                    message = f"{current_player} draws a card"
-                    message_timer = 60
+                draw_from_deck()
             
             # Switch player for testing
             elif event.key == pygame.K_TAB:
