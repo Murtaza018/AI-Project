@@ -1,8 +1,8 @@
-# main.py
 import pygame
 import random
 import math
 import time
+import copy
 from cards import generate_uno_deck
 
 # Initialize Pygame
@@ -62,6 +62,14 @@ animation_card = None
 message = ""
 message_timer = 0
 
+# New variables for black card functionality
+waiting_for_color_choice = False
+black_card_played = False
+
+# AI thinking flag
+ai_thinking = False
+ai_move_time = 0
+
 # Load fonts with better sizes
 pygame.font.init()
 small_font = pygame.font.Font(None, 20)
@@ -93,11 +101,23 @@ color_grid = [
     for _ in range(ROWS)
 ]
 
-# UNO deck
-deck = generate_uno_deck()
+# Get UNO deck and remove 0 cards
+def get_filtered_deck():
+    deck = generate_uno_deck()
+    # Filter out all "0" cards
+    filtered_deck = [card for card in deck if card["label"] != "0"]
+    return filtered_deck
+
+# UNO deck without 0 cards
+deck = get_filtered_deck()
 random.shuffle(deck)
 player_hands = {player: [deck.pop() for _ in range(7)] for player in active_players}
 current_card = deck.pop()
+# Make sure the starting card is not a special card
+while not current_card["label"].isdigit():
+    deck.append(current_card)
+    random.shuffle(deck)
+    current_card = deck.pop()
 
 # Function to get row and column from position number
 def get_row_col_from_pos(pos):
@@ -257,6 +277,12 @@ def get_player_offsets(player_count):
 
 # Check if a card can be played on the current card
 def can_play_card(card):
+    global black_card_played
+    
+    # If a black card was just played, any card can be played
+    if black_card_played:
+        return True
+    
     # Number cards
     if card["label"].isdigit() and current_card["label"].isdigit():
         return card["label"] == current_card["label"] or card["color"] == current_card["color"]
@@ -279,9 +305,42 @@ def can_play_card(card):
     
     return False
 
+# Draw color selection buttons
+def draw_color_selection():
+    button_width = 100
+    button_height = 50
+    spacing = 20
+    total_width = 4 * button_width + 3 * spacing
+    start_x = (WIDTH - total_width) // 2
+    y = HEIGHT // 2 - button_height // 2
+    
+    color_buttons = []
+    
+    for i, color in enumerate(["Red", "Blue", "Green", "Yellow"]):
+        x = start_x + i * (button_width + spacing)
+        rect = pygame.Rect(x, y, button_width, button_height)
+        
+        # Draw button
+        pygame.draw.rect(screen, COLORS[color], rect, border_radius=10)
+        pygame.draw.rect(screen, (0, 0, 0), rect, 2, border_radius=10)
+        
+        # Draw text
+        text = index_font.render(color, True, (0, 0, 0) if color == "Yellow" else (255, 255, 255))
+        text_rect = text.get_rect(center=rect.center)
+        screen.blit(text, text_rect)
+        
+        color_buttons.append((rect, color))
+    
+    # Draw prompt
+    prompt = message_font.render("Select a color", True, (30, 30, 100))
+    prompt_rect = prompt.get_rect(center=(WIDTH // 2, y - 40))
+    screen.blit(prompt, prompt_rect)
+    
+    return color_buttons
+
 # Handle the effects of playing a card
 def apply_card_effect(card, player_idx):
-    global current_player_idx, game_direction, message
+    global current_player_idx, game_direction, message, waiting_for_color_choice, black_card_played
     
     # If it's a number card, move the player
     if card["label"].isdigit():
@@ -296,8 +355,10 @@ def apply_card_effect(card, player_idx):
         message = f"{active_players[next_player_idx]} turn skipped!"
     
     elif card["label"] == "Reverse":
-        game_direction *= -1
-        message = "Direction reversed!"
+        # Modified: Reverse now works as Skip
+        next_player_idx = (player_idx + game_direction) % len(active_players)
+        players[active_players[next_player_idx]]["skip_turn"] = True
+        message = f"Reverse used as Skip! {active_players[next_player_idx]} turn skipped!"
     
     elif card["label"].startswith("Draw"):
         next_player_idx = (player_idx + game_direction) % len(active_players)
@@ -309,10 +370,15 @@ def apply_card_effect(card, player_idx):
         # Update target position immediately
         row, col = get_row_col_from_pos(players[next_player]["pos"])
         players[next_player]["target_pos"] = (row, col)
-        message = f"{next_player} moves back {draw_count} steps!"
         
-        # For colored Draw cards, the next player also draws cards
-        if card["color"] != "Black":
+        # For black Draw cards, the current player gets to play again
+        if card["color"] == "Black":
+            message = f"{next_player} moves back {draw_count} steps! {current_player} gets another turn!"
+            black_card_played = True
+            waiting_for_color_choice = True
+        else:
+            message = f"{next_player} moves back {draw_count} steps!"
+            # For colored Draw cards, the next player also draws cards
             for _ in range(min(draw_count, len(deck))):
                 if deck:
                     player_hands[next_player].append(deck.pop())
@@ -334,7 +400,10 @@ def apply_card_effect(card, player_idx):
 
 # Get the next player's turn
 def advance_turn():
-    global current_player_idx, current_player, message_timer
+    global current_player_idx, current_player, message_timer, black_card_played
+    
+    # Reset black card flag when advancing turn
+    black_card_played = False
     
     next_idx = (current_player_idx + game_direction) % len(active_players)
     
@@ -350,7 +419,7 @@ def advance_turn():
 
 # Play a selected card from the player's hand
 def play_card(card_idx):
-    global current_card, move_animation, animation_start_time, animation_card, message_timer
+    global current_card, move_animation, animation_start_time, animation_card, message_timer, waiting_for_color_choice, black_card_played
     
     card = player_hands[current_player][card_idx]
     
@@ -383,7 +452,17 @@ def play_card(card_idx):
             message_timer = 300  # Show message for 5 seconds
             return
         
-        # Advance to the next player
+        # If we're waiting for color choice, don't advance turn
+        if waiting_for_color_choice:
+            return
+        
+        # If black card was played and this is the second card, now advance turn
+        if black_card_played:
+            black_card_played = False
+            advance_turn()
+            return
+        
+        # Advance to the next player for normal cards
         advance_turn()
         
         # If the next player's hand is empty, draw a card
@@ -396,7 +475,7 @@ def play_card(card_idx):
 
 # Draw a card from the deck for the current player
 def draw_from_deck():
-    global message, message_timer
+    global message, message_timer, black_card_played
     
     if len(deck) > 0:
         # Add animation for drawing (could be implemented later)
@@ -412,11 +491,366 @@ def draw_from_deck():
         if can_play_card(new_card):
             message += " - you can play it!"
         else:
-            # If card can't be played, advance turn
-            advance_turn()
+            # If card can't be played and not after black card, advance turn
+            if not black_card_played:
+                advance_turn()
     else:
         message = "Deck is empty!"
         message_timer = 120
+
+# Set a color for the current card (after playing a black card)
+def set_card_color(color):
+    global current_card, waiting_for_color_choice, message, message_timer
+    
+    # Update the current card's color
+    current_card["color"] = color
+    waiting_for_color_choice = False
+    
+    message = f"Color changed to {color}! Play another card."
+    message_timer = 120
+
+# AI Bot Class with Minimax and Alpha-Beta Pruning
+# class AIBot:
+#     def __init__(self, player_name="Player2"):
+#         self.player_name = player_name
+#         self.thinking = False
+#         self.last_move_time = 0
+#         self.thinking_delay = 2.0  # 2 seconds delay
+#         self.max_depth = 3  # Maximum depth for minimax search
+    
+#     def start_thinking(self):
+#         self.thinking = True
+#         self.last_move_time = time.time()
+#         return "AI is thinking..."
+    
+#     def is_ready_to_move(self):
+#         return self.thinking and (time.time() - self.last_move_time >= self.thinking_delay)
+    
+#     def find_best_move(self, player_hand):
+#         # Find playable cards
+#         playable_cards = []
+#         for i, card in enumerate(player_hand):
+#             if can_play_card(card):
+#                 playable_cards.append((i, card))
+        
+#         if not playable_cards:
+#             return None  # No playable cards, need to draw
+        
+#         # Use minimax with alpha-beta pruning to find the best move
+#         best_score = float('-inf')
+#         best_move = None
+        
+#         # Create a copy of the game state for simulation
+#         game_state = self._create_game_state()
+        
+#         for idx, card in playable_cards:
+#             # Simulate playing this card
+#             score = self._minimax(game_state, card, 0, True, float('-inf'), float('inf'))
+            
+#             if score > best_score:
+#                 best_score = score
+#                 best_move = idx
+        
+#         return best_move
+    
+#     def _create_game_state(self):
+#         # Create a simplified copy of the current game state
+#         state = {
+#             'players': copy.deepcopy(players),
+#             'player_hands': {p: player_hands[p].copy() for p in active_players},
+#             'current_card': current_card.copy(),
+#             'current_player_idx': current_player_idx,
+#             'deck_size': len(deck)
+#         }
+#         return state
+    
+#     def _minimax(self, state, card, depth, is_maximizing, alpha, beta):
+#         # Terminal conditions
+#         if depth >= self.max_depth:
+#             return self._evaluate_state(state)
+        
+#         # Simulate playing the card
+#         new_state = self._simulate_play_card(state, card, is_maximizing)
+        
+#         # Check if game is over after this move
+#         if self._is_game_over(new_state):
+#             return 1000 if is_maximizing else -1000
+        
+#         # Recursively evaluate possible moves
+#         if is_maximizing:
+#             max_eval = float('-inf')
+#             for next_card in self._get_playable_cards(new_state, not is_maximizing):
+#                 eval = self._minimax(new_state, next_card, depth + 1, False, alpha, beta)
+#                 max_eval = max(max_eval, eval)
+#                 alpha = max(alpha, eval)
+#                 if beta <= alpha:
+#                     break  # Beta cutoff
+#             return max_eval
+#         else:
+#             min_eval = float('inf')
+#             for next_card in self._get_playable_cards(new_state, not is_maximizing):
+#                 eval = self._minimax(new_state, next_card, depth + 1, True, alpha, beta)
+#                 min_eval = min(min_eval, eval)
+#                 beta = min(beta, eval)
+#                 if beta <= alpha:
+#                     break  # Alpha cutoff
+#             return min_eval
+    
+#     def _simulate_play_card(self, state, card, is_maximizing):
+#         # Create a copy of the state to modify
+#         new_state = copy.deepcopy(state)
+        
+#         # Determine which player is playing
+#         player = "Player2" if is_maximizing else "Player1"
+#         player_idx = 1 if is_maximizing else 0
+        
+#         # Remove card from hand
+#         if card in new_state['player_hands'][player]:
+#             new_state['player_hands'][player].remove(card)
+        
+#         # Update current card
+#         new_state['current_card'] = card
+        
+#         # Apply card effects
+#         if card["label"].isdigit():
+#             # Move player forward
+#             steps = int(card["label"])
+#             new_state['players'][player]["pos"] += steps
+#         elif card["label"] == "Skip" or card["label"] == "Reverse":
+#             # Skip opponent's turn
+#             opponent = "Player1" if is_maximizing else "Player2"
+#             new_state['players'][opponent]["skip_turn"] = True
+#         elif card["label"].startswith("Draw"):
+#             # Move opponent backward
+#             opponent = "Player1" if is_maximizing else "Player2"
+#             draw_count = int(card["label"].split()[1])
+#             new_state['players'][opponent]["pos"] = max(1, new_state['players'][opponent]["pos"] - draw_count)
+        
+#         # Update positions
+#         for p in new_state['players']:
+#             pos = new_state['players'][p]["pos"]
+#             pos = max(1, min(pos, ROWS * COLS))
+#             new_state['players'][p]["pos"] = pos
+        
+#         return new_state
+    
+#     def _get_playable_cards(self, state, is_maximizing):
+#         # Get playable cards for the specified player
+#         player = "Player2" if is_maximizing else "Player1"
+#         playable = []
+        
+#         for card in state['player_hands'][player]:
+#             if self._can_play_card(card, state['current_card']):
+#                 playable.append(card)
+        
+#         return playable
+    
+#     def _can_play_card(self, card, current):
+#         # Check if a card can be played on the current card
+#         if card["color"] == "Black":
+#             return True
+#         if card["color"] == current["color"] or card["label"] == current["label"]:
+#             return True
+#         if current["color"] == "Black":
+#             return True
+#         return False
+    
+#     def _is_game_over(self, state):
+#         # Check if any player has reached the end or has no cards
+#         for player in ["Player1", "Player2"]:
+#             if state['players'][player]["pos"] >= ROWS * COLS:
+#                 return True
+#             if len(state['player_hands'][player]) == 0:
+#                 return True
+#         return False
+    
+#     def _evaluate_state(self, state):
+#         # Evaluate the game state from AI's perspective
+#         ai_pos = state['players']["Player2"]["pos"]
+#         human_pos = state['players']["Player1"]["pos"]
+        
+#         # Position difference (higher is better for AI)
+#         position_score = ai_pos - human_pos
+        
+#         # Card advantage (fewer cards is better)
+#         ai_cards = len(state['player_hands']["Player2"])
+#         human_cards = len(state['player_hands']["Player1"])
+#         card_score = human_cards - ai_cards
+        
+#         # Distance to goal
+#         ai_distance = ROWS * COLS - ai_pos
+#         human_distance = ROWS * COLS - human_pos
+#         distance_score = human_distance - ai_distance
+        
+#         # Special cards in hand are valuable
+#         special_card_score = 0
+#         for card in state['player_hands']["Player2"]:
+#             if card["label"] == "Skip" or card["label"] == "Reverse":
+#                 special_card_score += 5
+#             elif card["label"].startswith("Draw"):
+#                 special_card_score += 10
+#             elif card["color"] == "Black":
+#                 special_card_score += 15
+        
+#         # Combine all factors with appropriate weights
+#         total_score = (
+#             position_score * 3 + 
+#             card_score * 2 + 
+#             distance_score * 5 + 
+#             special_card_score
+#         )
+        
+#         return total_score
+    
+#     def choose_color(self):
+#         # Count colors in hand
+#         color_counts = {"Red": 0, "Blue": 0, "Green": 0, "Yellow": 0}
+#         for card in player_hands[self.player_name]:
+#             if card["color"] in color_counts:
+#                 color_counts[card["color"]] += 1
+        
+#         # Choose most common color
+#         best_color = max(color_counts.items(), key=lambda x: x[1])[0] if any(color_counts.values()) else "Red"
+#         return best_color
+
+# AI Bot Class - Simplified to ensure it works
+class AIBot:
+    def __init__(self, player_name="Player2"):
+        self.player_name = player_name
+        self.thinking = False
+        self.last_move_time = 0
+        self.thinking_delay = 2.0  # 2 seconds delay
+    
+    def start_thinking(self):
+        self.thinking = True
+        self.last_move_time = time.time()
+        return "AI is thinking..."
+    
+    def is_ready_to_move(self):
+        return self.thinking and (time.time() - self.last_move_time >= self.thinking_delay)
+    
+    def find_best_move(self, player_hand):
+        # Find playable cards - simplified approach
+        playable_cards = []
+        for i, card in enumerate(player_hand):
+            if can_play_card(card):
+                playable_cards.append((i, card))
+        
+        if not playable_cards:
+            return None  # No playable cards, need to draw
+        
+        # Sort by value (higher numbers and special cards first)
+        def card_value(card_tuple):
+            idx, card = card_tuple
+            if card["label"].isdigit():
+                return int(card["label"])
+            elif card["label"] == "Skip" or card["label"] == "Reverse":
+                return 10
+            elif card["label"].startswith("Draw"):
+                return 15
+            return 5
+        
+        playable_cards.sort(key=card_value, reverse=True)
+        return playable_cards[0][0]  # Return index of best card
+
+    def choose_color(self):
+        # Count colors in hand
+        color_counts = {"Red": 0, "Blue": 0, "Green": 0, "Yellow": 0}
+        for card in player_hands[self.player_name]:
+            if card["color"] in color_counts:
+                color_counts[card["color"]] += 1
+        
+        # Choose most common color
+        best_color = max(color_counts.items(), key=lambda x: x[1])[0] if any(color_counts.values()) else "Red"
+        return best_color
+
+# Create AI bot instance
+ai_bot = AIBot()
+
+# AI makes a move
+# def ai_make_move():
+#     global message, message_timer, ai_thinking, waiting_for_color_choice, current_card
+    
+#     # Safety check - only make a move if it's actually Player 2's turn
+#     if current_player != "Player2":
+#         message = "Error: AI tried to play during Player 1's turn!"
+#         message_timer = 120
+#         ai_thinking = False
+#         return
+
+#     # Reset AI thinking flag
+#     ai_thinking = False
+    
+#     # If waiting for color choice, select a color
+#     if waiting_for_color_choice:
+#         color = ai_bot.choose_color()
+#         message = f"AI chooses {color}"
+#         message_timer = 120
+#         set_card_color(color)
+#         return
+    
+#     # Find best card to play using minimax
+#     best_card_idx = ai_bot.find_best_move(player_hands["Player2"])
+    
+#     if best_card_idx is not None:
+#         # Play the best card
+#         card = player_hands["Player2"][best_card_idx]
+#         message = f"AI plays {card['color']} {card['label']}"
+#         message_timer = 120
+#         play_card(best_card_idx)
+#     else:
+#         # Draw a card if no playable cards
+#         message = "AI draws a card"
+#         message_timer = 120
+#         draw_from_deck()
+
+# AI makes a move - simplified and with more debugging
+def ai_make_move():
+    global message, message_timer, ai_thinking, waiting_for_color_choice, current_card
+    
+    # Reset AI thinking flag
+    ai_thinking = False
+    
+    # Debug message
+    print(f"AI making move. Current player: {current_player}, Waiting for color: {waiting_for_color_choice}")
+    
+    # Safety check - only make a move if it's actually Player 2's turn
+    if current_player != "Player2":
+        message = f"Error: AI tried to play during {current_player}'s turn!"
+        message_timer = 120
+        print(message)
+        return
+    
+    # If waiting for color choice, select a color
+    if waiting_for_color_choice:
+        color = ai_bot.choose_color()
+        message = f"AI chooses {color}"
+        message_timer = 120
+        set_card_color(color)
+        print(f"AI chose color: {color}")
+        return
+    
+    # Find best card to play
+    if len(player_hands["Player2"]) > 0:
+        best_card_idx = ai_bot.find_best_move(player_hands["Player2"])
+        
+        if best_card_idx is not None:
+            # Play the best card
+            card = player_hands["Player2"][best_card_idx]
+            message = f"AI plays {card['color']} {card['label']}"
+            message_timer = 120
+            print(f"AI playing card: {card['color']} {card['label']}")
+            play_card(best_card_idx)
+        else:
+            # Draw a card if no playable cards
+            message = "AI draws a card"
+            message_timer = 120
+            print("AI drawing card (no playable cards)")
+            draw_from_deck()
+    else:
+        message = "AI has no cards!"
+        message_timer = 120
+        print("AI has no cards!")
 
 # Game loop
 running = True
@@ -581,6 +1015,10 @@ while running:
         card_x = current_card_x + (card_area_width - 10) / 2 - 42  # Center the card
         draw_card(card_x, hand_y, current_card["color"], current_card["label"])
     
+    # Display color selection if waiting for choice
+    if waiting_for_color_choice:
+        color_buttons = draw_color_selection()
+    
     # Display message if timer is active
     if message_timer > 0:
         message_timer -= 1
@@ -599,46 +1037,86 @@ while running:
             running = False
         
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            # Check if player clicked on a card in their hand
-            for i, card_rect in enumerate(card_rects):
-                if card_rect.collidepoint(event.pos):
-                    # Try to play the card
-                    if can_play_card(current_hand[i]):
-                        play_card(i)
-                    else:
-                        selected_card = i
-                        message = "Can't play that card!"
-                        message_timer = 60
-                    break
-            
-            # Check if player clicked on the draw deck
-            if deck_rect.collidepoint(event.pos) and len(deck) > 0:
-                draw_from_deck()
+            # Check if waiting for color selection
+            if waiting_for_color_choice:
+                for button_rect, color in color_buttons:
+                    if button_rect.collidepoint(event.pos):
+                        set_card_color(color)
+                        break
+            else:
+                # Only process clicks if it's Player1's turn and AI is not thinking
+                if current_player == "Player1" and not ai_thinking:
+                    # Check if player clicked on a card in their hand
+                    for i, card_rect in enumerate(card_rects):
+                        if card_rect.collidepoint(event.pos):
+                            # Try to play the card
+                            if can_play_card(current_hand[i]):
+                                play_card(i)
+                            else:
+                                selected_card = i
+                                message = "Can't play that card!"
+                                message_timer = 60
+                            break
+                    
+                    # Check if player clicked on the draw deck
+                    if deck_rect.collidepoint(event.pos) and len(deck) > 0:
+                        draw_from_deck()
         
         elif event.type == pygame.KEYDOWN:
             # Manual controls for testing
             if event.key == pygame.K_SPACE:
-                if selected_card >= 0 and selected_card < len(current_hand):
+                if current_player == "Player1" and selected_card >= 0 and selected_card < len(current_hand):
                     play_card(selected_card)
                     selected_card = -1
             
             elif event.key == pygame.K_LEFT:
-                if len(current_hand) > 0:
+                if current_player == "Player1" and len(current_hand) > 0:
                     selected_card = max(selected_card - 1, 0) if selected_card > 0 else len(current_hand) - 1
             
             elif event.key == pygame.K_RIGHT:
-                if len(current_hand) > 0:
+                if current_player == "Player1" and len(current_hand) > 0:
                     selected_card = (selected_card + 1) % len(current_hand)
             
             # Test draws
             elif event.key == pygame.K_d:
-                draw_from_deck()
+                if current_player == "Player1":
+                    draw_from_deck()
             
             # Switch player for testing
             elif event.key == pygame.K_TAB:
                 advance_turn()
                 message = f"{current_player}'s turn"
                 message_timer = 60
+            
+            # Escape to quit
+            elif event.key == pygame.K_ESCAPE:
+                running = False
+
+    # If it's Player2's turn and not waiting for color choice, let AI make a move
+    # if current_player == "Player2" and not waiting_for_color_choice and not move_animation:
+    #     if not ai_thinking:
+    #         # Set AI thinking flag and start timer
+    #         ai_thinking = True
+    #         ai_move_time = time.time()
+    #         message = "AI is thinking..."
+    #         message_timer = 120
+    #     elif ai_thinking and time.time() - ai_move_time >= 2.0:  # 2 second delay
+    #         # Make the move after the delay
+    #         ai_make_move()
+
+    # If it's Player2's turn and not waiting for color choice, let AI make a move
+    if current_player == "Player2" and not move_animation:
+        if not ai_thinking:
+            # Set AI thinking flag and start timer
+            ai_thinking = True
+            ai_move_time = time.time()
+            message = "AI is thinking..."
+            message_timer = 120
+            print("AI started thinking")
+        elif ai_thinking and time.time() - ai_move_time >= 2.0:  # 2 second delay
+            # Make the move after the delay
+            print("AI ready to make move after delay")
+            ai_make_move()
 
     pygame.display.flip()
     clock.tick(60)  # 60 FPS
