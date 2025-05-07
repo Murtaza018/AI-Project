@@ -15,7 +15,6 @@ BOARD_HEIGHT = int(HEIGHT * BOARD_HEIGHT_RATIO)
 CELL_HEIGHT = BOARD_HEIGHT // ROWS
 screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN)
 pygame.display.set_caption("Game Board")
-
 # Define color palette with more vibrant colors
 COLORS = {
     "Red": (255, 80, 80),
@@ -59,16 +58,8 @@ move_animation = False
 animation_start_time = 0
 animation_duration = 0.5  # seconds
 animation_card = None
-message = ""
-message_timer = 0
-
-# New variables for black card functionality
-waiting_for_color_choice = False
 black_card_played = False
 
-# AI thinking flag
-ai_thinking = False
-ai_move_time = 0
 
 # Load fonts with better sizes
 pygame.font.init()
@@ -490,6 +481,8 @@ def draw_from_deck():
         # Check if the drawn card can be played
         if can_play_card(new_card):
             message += " - you can play it!"
+            # Don't advance turn if the card can be played - FIX #2
+            return
         else:
             # If card can't be played and not after black card, advance turn
             if not black_card_played:
@@ -509,251 +502,281 @@ def set_card_color(color):
     message = f"Color changed to {color}! Play another card."
     message_timer = 120
 
-# AI Bot Class with Minimax and Alpha-Beta Pruning
-# class AIBot:
-#     def __init__(self, player_name="Player2"):
-#         self.player_name = player_name
-#         self.thinking = False
-#         self.last_move_time = 0
-#         self.thinking_delay = 2.0  # 2 seconds delay
-#         self.max_depth = 3  # Maximum depth for minimax search
-    
-#     def start_thinking(self):
-#         self.thinking = True
-#         self.last_move_time = time.time()
-#         return "AI is thinking..."
-    
-#     def is_ready_to_move(self):
-#         return self.thinking and (time.time() - self.last_move_time >= self.thinking_delay)
-    
-#     def find_best_move(self, player_hand):
-#         # Find playable cards
-#         playable_cards = []
-#         for i, card in enumerate(player_hand):
-#             if can_play_card(card):
-#                 playable_cards.append((i, card))
-        
-#         if not playable_cards:
-#             return None  # No playable cards, need to draw
-        
-#         # Use minimax with alpha-beta pruning to find the best move
-#         best_score = float('-inf')
-#         best_move = None
-        
-#         # Create a copy of the game state for simulation
-#         game_state = self._create_game_state()
-        
-#         for idx, card in playable_cards:
-#             # Simulate playing this card
-#             score = self._minimax(game_state, card, 0, True, float('-inf'), float('inf'))
-            
-#             if score > best_score:
-#                 best_score = score
-#                 best_move = idx
-        
-#         return best_move
-    
-#     def _create_game_state(self):
-#         # Create a simplified copy of the current game state
-#         state = {
-#             'players': copy.deepcopy(players),
-#             'player_hands': {p: player_hands[p].copy() for p in active_players},
-#             'current_card': current_card.copy(),
-#             'current_player_idx': current_player_idx,
-#             'deck_size': len(deck)
-#         }
-#         return state
-    
-#     def _minimax(self, state, card, depth, is_maximizing, alpha, beta):
-#         # Terminal conditions
-#         if depth >= self.max_depth:
-#             return self._evaluate_state(state)
-        
-#         # Simulate playing the card
-#         new_state = self._simulate_play_card(state, card, is_maximizing)
-        
-#         # Check if game is over after this move
-#         if self._is_game_over(new_state):
-#             return 1000 if is_maximizing else -1000
-        
-#         # Recursively evaluate possible moves
-#         if is_maximizing:
-#             max_eval = float('-inf')
-#             for next_card in self._get_playable_cards(new_state, not is_maximizing):
-#                 eval = self._minimax(new_state, next_card, depth + 1, False, alpha, beta)
-#                 max_eval = max(max_eval, eval)
-#                 alpha = max(alpha, eval)
-#                 if beta <= alpha:
-#                     break  # Beta cutoff
-#             return max_eval
-#         else:
-#             min_eval = float('inf')
-#             for next_card in self._get_playable_cards(new_state, not is_maximizing):
-#                 eval = self._minimax(new_state, next_card, depth + 1, True, alpha, beta)
-#                 min_eval = min(min_eval, eval)
-#                 beta = min(beta, eval)
-#                 if beta <= alpha:
-#                     break  # Alpha cutoff
-#             return min_eval
-    
-#     def _simulate_play_card(self, state, card, is_maximizing):
-#         # Create a copy of the state to modify
-#         new_state = copy.deepcopy(state)
-        
-#         # Determine which player is playing
-#         player = "Player2" if is_maximizing else "Player1"
-#         player_idx = 1 if is_maximizing else 0
-        
-#         # Remove card from hand
-#         if card in new_state['player_hands'][player]:
-#             new_state['player_hands'][player].remove(card)
-        
-#         # Update current card
-#         new_state['current_card'] = card
-        
-#         # Apply card effects
-#         if card["label"].isdigit():
-#             # Move player forward
-#             steps = int(card["label"])
-#             new_state['players'][player]["pos"] += steps
-#         elif card["label"] == "Skip" or card["label"] == "Reverse":
-#             # Skip opponent's turn
-#             opponent = "Player1" if is_maximizing else "Player2"
-#             new_state['players'][opponent]["skip_turn"] = True
-#         elif card["label"].startswith("Draw"):
-#             # Move opponent backward
-#             opponent = "Player1" if is_maximizing else "Player2"
-#             draw_count = int(card["label"].split()[1])
-#             new_state['players'][opponent]["pos"] = max(1, new_state['players'][opponent]["pos"] - draw_count)
-        
-#         # Update positions
-#         for p in new_state['players']:
-#             pos = new_state['players'][p]["pos"]
-#             pos = max(1, min(pos, ROWS * COLS))
-#             new_state['players'][p]["pos"] = pos
-        
-#         return new_state
-    
-#     def _get_playable_cards(self, state, is_maximizing):
-#         # Get playable cards for the specified player
-#         player = "Player2" if is_maximizing else "Player1"
-#         playable = []
-        
-#         for card in state['player_hands'][player]:
-#             if self._can_play_card(card, state['current_card']):
-#                 playable.append(card)
-        
-#         return playable
-    
-#     def _can_play_card(self, card, current):
-#         # Check if a card can be played on the current card
-#         if card["color"] == "Black":
-#             return True
-#         if card["color"] == current["color"] or card["label"] == current["label"]:
-#             return True
-#         if current["color"] == "Black":
-#             return True
-#         return False
-    
-#     def _is_game_over(self, state):
-#         # Check if any player has reached the end or has no cards
-#         for player in ["Player1", "Player2"]:
-#             if state['players'][player]["pos"] >= ROWS * COLS:
-#                 return True
-#             if len(state['player_hands'][player]) == 0:
-#                 return True
-#         return False
-    
-#     def _evaluate_state(self, state):
-#         # Evaluate the game state from AI's perspective
-#         ai_pos = state['players']["Player2"]["pos"]
-#         human_pos = state['players']["Player1"]["pos"]
-        
-#         # Position difference (higher is better for AI)
-#         position_score = ai_pos - human_pos
-        
-#         # Card advantage (fewer cards is better)
-#         ai_cards = len(state['player_hands']["Player2"])
-#         human_cards = len(state['player_hands']["Player1"])
-#         card_score = human_cards - ai_cards
-        
-#         # Distance to goal
-#         ai_distance = ROWS * COLS - ai_pos
-#         human_distance = ROWS * COLS - human_pos
-#         distance_score = human_distance - ai_distance
-        
-#         # Special cards in hand are valuable
-#         special_card_score = 0
-#         for card in state['player_hands']["Player2"]:
-#             if card["label"] == "Skip" or card["label"] == "Reverse":
-#                 special_card_score += 5
-#             elif card["label"].startswith("Draw"):
-#                 special_card_score += 10
-#             elif card["color"] == "Black":
-#                 special_card_score += 15
-        
-#         # Combine all factors with appropriate weights
-#         total_score = (
-#             position_score * 3 + 
-#             card_score * 2 + 
-#             distance_score * 5 + 
-#             special_card_score
-#         )
-        
-#         return total_score
-    
-#     def choose_color(self):
-#         # Count colors in hand
-#         color_counts = {"Red": 0, "Blue": 0, "Green": 0, "Yellow": 0}
-#         for card in player_hands[self.player_name]:
-#             if card["color"] in color_counts:
-#                 color_counts[card["color"]] += 1
-        
-#         # Choose most common color
-#         best_color = max(color_counts.items(), key=lambda x: x[1])[0] if any(color_counts.values()) else "Red"
-#         return best_color
+# Global variables
+global message, message_timer, ai_thinking, waiting_for_color_choice
+message = ""
+message_timer = 0
+ai_thinking = False
+waiting_for_color_choice = False
 
-# AI Bot Class - Simplified to ensure it works
+# Constants for evaluation
+MAX_DEPTH = 3  # Depth of the search tree
+
+# Clean implementation of the AI Bot class with Minimax and Alpha-Beta Pruning
 class AIBot:
     def __init__(self, player_name="Player2"):
         self.player_name = player_name
-        self.thinking = False
-        self.last_move_time = 0
-        self.thinking_delay = 2.0  # 2 seconds delay
-    
-    def start_thinking(self):
-        self.thinking = True
-        self.last_move_time = time.time()
-        return "AI is thinking..."
-    
-    def is_ready_to_move(self):
-        return self.thinking and (time.time() - self.last_move_time >= self.thinking_delay)
-    
-    def find_best_move(self, player_hand):
-        # Find playable cards - simplified approach
-        playable_cards = []
-        for i, card in enumerate(player_hand):
-            if can_play_card(card):
-                playable_cards.append((i, card))
-        
-        if not playable_cards:
-            return None  # No playable cards, need to draw
-        
-        # Sort by value (higher numbers and special cards first)
-        def card_value(card_tuple):
-            idx, card = card_tuple
-            if card["label"].isdigit():
-                return int(card["label"])
-            elif card["label"] == "Skip" or card["label"] == "Reverse":
-                return 10
-            elif card["label"].startswith("Draw"):
-                return 15
-            return 5
-        
-        playable_cards.sort(key=card_value, reverse=True)
-        return playable_cards[0][0]  # Return index of best card
+        self.thinking_delay = 1.0
+        self.max_depth = 2  # Reduced depth for better performance
+        self.last_move = None
 
+    def find_best_move(self):
+        """Find the best move with safety checks"""
+        try:
+            game_state = self._create_game_state()
+            possible_moves = self._get_possible_moves(game_state)
+            
+            if not possible_moves:
+                return {'type': 'draw'}
+            
+            # Safety check - verify all card indices are valid
+            valid_moves = []
+            for move in possible_moves:
+                if move['type'] == 'play':
+                    hand_size = len(game_state['hands'][self.player_name])
+                    if 0 <= move['card_index'] < hand_size:
+                        valid_moves.append(move)
+                else:
+                    valid_moves.append(move)
+            
+            if not valid_moves:
+                return {'type': 'draw'}
+            
+            best_score = float('-inf')
+            best_move = valid_moves[0]  # Default to first valid move
+            alpha = float('-inf')
+            beta = float('inf')
+
+            for move in valid_moves:
+                new_state = self._simulate_move(game_state.copy(), move)
+                score = self._minimax(new_state, self.max_depth - 1, alpha, beta, False)
+                
+                if score > best_score:
+                    best_score = score
+                    best_move = move
+                
+                alpha = max(alpha, best_score)
+                if beta <= alpha:
+                    break
+
+            self.last_move = best_move
+            return best_move
+
+        except Exception as e:
+            print(f"AI error: {e}")
+            # Fallback to simple strategy if Minimax fails
+            return self._fallback_strategy()
+
+    def _fallback_strategy(self):
+        """Simple fallback strategy when Minimax fails"""
+        hand = player_hands[self.player_name]
+        current_card_color = current_card["color"]
+        current_card_label = current_card["label"]
+        
+        # Try to play matching color first
+        for i, card in enumerate(hand):
+            if card["color"] == current_card_color:
+                return {'type': 'play', 'card_index': i, 'card': card}
+        
+        # Then try matching label
+        for i, card in enumerate(hand):
+            if card["label"] == current_card_label:
+                return {'type': 'play', 'card_index': i, 'card': card}
+        
+        # Then wild cards
+        for i, card in enumerate(hand):
+            if card["color"] == "Black":
+                return {'type': 'play', 'card_index': i, 'card': card}
+        
+        # Finally draw if nothing else
+        return {'type': 'draw'}
+
+    def _minimax(self, state, depth, alpha, beta, is_maximizing):
+        """Minimax with safety checks"""
+        try:
+            if depth == 0 or self._is_terminal_state(state):
+                return self._evaluate_state(state, is_maximizing)
+
+            if is_maximizing:
+                max_eval = float('-inf')
+                for move in self._get_possible_moves(state, is_maximizing=True):
+                    new_state = self._simulate_move(state.copy(), move)
+                    eval = self._minimax(new_state, depth - 1, alpha, beta, False)
+                    max_eval = max(max_eval, eval)
+                    alpha = max(alpha, eval)
+                    if beta <= alpha:
+                        break
+                return max_eval
+            else:
+                min_eval = float('inf')
+                for move in self._get_possible_moves(state, is_maximizing=False):
+                    new_state = self._simulate_move(state.copy(), move)
+                    eval = self._minimax(new_state, depth - 1, alpha, beta, True)
+                    min_eval = min(min_eval, eval)
+                    beta = min(beta, eval)
+                    if beta <= alpha:
+                        break
+                return min_eval
+        except Exception as e:
+            print(f"Minimax error: {e}")
+            return 0  # Neutral score if error occurs
+
+    def _simulate_move(self, state, move):
+        """Safer move simulation with validation"""
+        try:
+            current_player = state['current_player']
+            opponent = state['opponent']
+            
+            if move['type'] == 'play':
+                # Validate card index
+                if move['card_index'] >= len(state['hands'][current_player]):
+                    raise IndexError("Invalid card index in simulation")
+                
+                # Remove card from hand
+                card = state['hands'][current_player].pop(move['card_index'])
+                state['current_card'] = card
+
+                # Apply card effects
+                if card["label"].isdigit():
+                    steps = int(card["label"])
+                    state['players_pos'][current_player] += steps
+                elif card["label"] == "Skip":
+                    state['skip_status'][opponent] = True
+                elif card["label"] == "Reverse":
+                    state['game_direction'] *= -1
+                    if len(active_players) == 2:
+                        state['skip_status'][opponent] = True
+                elif card["label"].startswith("Draw"):
+                    draw_count = int(card["label"].split()[1])
+                    state['players_pos'][opponent] = max(1, state['players_pos'][opponent] - draw_count)
+                    if card["color"] != "Black":
+                        draw_amount = min(draw_count, state['deck_size'])
+                        state['deck_size'] -= draw_amount
+
+                # Handle position bounds
+                state['players_pos'][current_player] = max(1, min(state['players_pos'][current_player], ROWS * COLS))
+                state['players_pos'][opponent] = max(1, min(state['players_pos'][opponent], ROWS * COLS))
+
+            elif move['type'] == 'draw':
+                if state['deck_size'] > 0:
+                    state['deck_size'] -= 1
+
+            # Switch turns unless it's a black card that allows another turn
+            if move['type'] != 'play' or move['card']['color'] != "Black":
+                if state['skip_status'][opponent]:
+                    state['skip_status'][opponent] = False
+                else:
+                    state['current_player'], state['opponent'] = state['opponent'], state['current_player']
+
+            return state
+        except Exception as e:
+            print(f"Simulation error: {e}")
+            return state  # Return original state if error occurs
+
+    def _create_game_state(self):
+        """Create a simplified game state for AI evaluation"""
+        return {
+            'hands': {p: player_hands[p].copy() for p in active_players},
+            'current_card': current_card.copy(),
+            'players_pos': {p: players[p]["pos"] for p in active_players},
+            'skip_status': {p: players[p]["skip_turn"] for p in active_players},
+            'deck_size': len(deck),
+            'current_player': self.player_name,
+            'opponent': 'Player1',  # Assuming 2-player game
+            'game_direction': game_direction
+        }
+    
+    def _get_possible_moves(self, state, is_maximizing=True):
+        """Get all possible moves for the current player"""
+        player = state['current_player'] if is_maximizing else state['opponent']
+        moves = []
+        
+        #  if is_maximizing else state['opponent']
+        moves = []
+        
+        # Check for playable cards
+        for i, card in enumerate(state['hands'][player]):
+            if self._can_play_card(card, state['current_card']):
+                moves.append({
+                    'type': 'play',
+                    'card_index': i,
+                    'card': card
+                })
+        
+        # Always include draw option
+        if state['deck_size'] > 0:
+            moves.append({'type': 'draw'})
+            
+        return moves
+    
+    def _can_play_card(self, card, current_card):
+        """Check if a card can be played on the current card"""
+        # Black cards can be played on anything
+        if card["color"] == "Black":
+            return True
+            
+        # Same color or same label
+        if card["color"] == current_card["color"] or card["label"] == current_card["label"]:
+            return True
+            
+        # Current card is black (with a chosen color)
+        if current_card["color"] == "Black":
+            return True
+            
+        return False
+    
+    def _is_terminal_state(self, state):
+        """Check if the game state is terminal"""
+        # Check if any player has reached the end
+        for player in [state['current_player'], state['opponent']]:
+            if state['players_pos'][player] >= ROWS * COLS:
+                return True
+                
+        # Check if any player has no cards left
+        for player in [state['current_player'], state['opponent']]:
+            if len(state['hands'][player]) == 0:
+                return True
+                
+        return False
+    
+    def _evaluate_state(self, state, is_maximizing):
+        """Evaluate the game state from AI's perspective"""
+        ai_player = state['current_player'] if is_maximizing else state['opponent']
+        human_player = state['opponent'] if is_maximizing else state['current_player']
+        
+        # Position difference
+        position_score = state['players_pos'][ai_player] - state['players_pos'][human_player]
+        
+        # Card advantage
+        card_score = len(state['hands'][human_player]) - len(state['hands'][ai_player])
+        
+        # Distance to goal
+        ai_distance = ROWS * COLS - state['players_pos'][ai_player]
+        human_distance = ROWS * COLS - state['players_pos'][human_player]
+        distance_score = human_distance - ai_distance
+        
+        # Special cards in hand
+        special_card_score = 0
+        for card in state['hands'][ai_player]:
+            if card["label"] == "Skip" or card["label"] == "Reverse":
+                special_card_score += 5
+            elif card["label"].startswith("Draw"):
+                special_card_score += 10
+            elif card["color"] == "Black":
+                special_card_score += 15
+        
+        # Combine scores with weights
+        total_score = (
+            position_score * 3 + 
+            card_score * 2 + 
+            distance_score * 5 + 
+            special_card_score
+        )
+        
+        return total_score
+        
     def choose_color(self):
+        """Choose the most advantageous color based on AI's hand"""
         # Count colors in hand
         color_counts = {"Red": 0, "Blue": 0, "Green": 0, "Yellow": 0}
         for card in player_hands[self.player_name]:
@@ -764,94 +787,60 @@ class AIBot:
         best_color = max(color_counts.items(), key=lambda x: x[1])[0] if any(color_counts.values()) else "Red"
         return best_color
 
-# Create AI bot instance
-ai_bot = AIBot()
+ai_bot = AIBot("Player2")
 
-# AI makes a move
-# def ai_make_move():
-#     global message, message_timer, ai_thinking, waiting_for_color_choice, current_card
-    
-#     # Safety check - only make a move if it's actually Player 2's turn
-#     if current_player != "Player2":
-#         message = "Error: AI tried to play during Player 1's turn!"
-#         message_timer = 120
-#         ai_thinking = False
-#         return
-
-#     # Reset AI thinking flag
-#     ai_thinking = False
-    
-#     # If waiting for color choice, select a color
-#     if waiting_for_color_choice:
-#         color = ai_bot.choose_color()
-#         message = f"AI chooses {color}"
-#         message_timer = 120
-#         set_card_color(color)
-#         return
-    
-#     # Find best card to play using minimax
-#     best_card_idx = ai_bot.find_best_move(player_hands["Player2"])
-    
-#     if best_card_idx is not None:
-#         # Play the best card
-#         card = player_hands["Player2"][best_card_idx]
-#         message = f"AI plays {card['color']} {card['label']}"
-#         message_timer = 120
-#         play_card(best_card_idx)
-#     else:
-#         # Draw a card if no playable cards
-#         message = "AI draws a card"
-#         message_timer = 120
-#         draw_from_deck()
-
-# AI makes a move - simplified and with more debugging
 def ai_make_move():
     global message, message_timer, ai_thinking, waiting_for_color_choice, current_card
-    
+
     # Reset AI thinking flag
     ai_thinking = False
-    
-    # Debug message
-    print(f"AI making move. Current player: {current_player}, Waiting for color: {waiting_for_color_choice}")
-    
-    # Safety check - only make a move if it's actually Player 2's turn
-    if current_player != "Player2":
-        message = f"Error: AI tried to play during {current_player}'s turn!"
-        message_timer = 120
-        print(message)
-        return
-    
-    # If waiting for color choice, select a color
-    if waiting_for_color_choice:
+
+    # If waiting for color choice, handle that first
+    if waiting_for_color_choice and current_player == "Player2":  # FIX #1: AI automatically chooses color
         color = ai_bot.choose_color()
         message = f"AI chooses {color}"
         message_timer = 120
         set_card_color(color)
-        print(f"AI chose color: {color}")
         return
-    
-    # Find best card to play
-    if len(player_hands["Player2"]) > 0:
-        best_card_idx = ai_bot.find_best_move(player_hands["Player2"])
-        
-        if best_card_idx is not None:
-            # Play the best card
-            card = player_hands["Player2"][best_card_idx]
-            message = f"AI plays {card['color']} {card['label']}"
-            message_timer = 120
-            print(f"AI playing card: {card['color']} {card['label']}")
-            play_card(best_card_idx)
-        else:
-            # Draw a card if no playable cards
+
+    try:
+        # Find and play best move
+        best_move = ai_bot.find_best_move()
+
+        if best_move['type'] == 'play':
+            # Additional safety check
+            if best_move['card_index'] < len(player_hands["Player2"]):
+                card = player_hands["Player2"][best_move['card_index']]
+                message = f"AI plays {card['color']} {card['label']}"
+                message_timer = 120
+                play_card(best_move['card_index'])
+            else:
+                message = "AI draws a card (invalid play)"
+                message_timer = 120
+                draw_from_deck()
+        elif best_move['type'] == 'draw':
             message = "AI draws a card"
             message_timer = 120
-            print("AI drawing card (no playable cards)")
             draw_from_deck()
-    else:
-        message = "AI has no cards!"
+    except Exception as e:
+        print(f"AI error: {e}")
+        message = "AI draws a card (error)"
         message_timer = 120
-        print("AI has no cards!")
+        draw_from_deck()
 
+# Function to convert the current game state into a dictionary
+def get_game_state():
+    return {
+        'hands': {
+            'Player1': player_hands['Player1'][:],
+            'Player2': player_hands['Player2'][:]
+        },
+        'current_card': current_card.copy(),
+        'deck': deck[:]
+    }
+
+
+# In your game loop, ensure that ai_make_move is called appropriately when it's AI's turn
 # Game loop
 running = True
 clock = pygame.time.Clock()
@@ -1016,7 +1005,7 @@ while running:
         draw_card(card_x, hand_y, current_card["color"], current_card["label"])
     
     # Display color selection if waiting for choice
-    if waiting_for_color_choice:
+    if waiting_for_color_choice and current_player == "Player1":  # FIX #1: Only show color selection for human player
         color_buttons = draw_color_selection()
     
     # Display message if timer is active
@@ -1038,7 +1027,7 @@ while running:
         
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             # Check if waiting for color selection
-            if waiting_for_color_choice:
+            if waiting_for_color_choice and current_player == "Player1":  # FIX #1: Only process color selection for human player
                 for button_rect, color in color_buttons:
                     if button_rect.collidepoint(event.pos):
                         set_card_color(color)
@@ -1093,32 +1082,16 @@ while running:
                 running = False
 
     # If it's Player2's turn and not waiting for color choice, let AI make a move
-    # if current_player == "Player2" and not waiting_for_color_choice and not move_animation:
-    #     if not ai_thinking:
-    #         # Set AI thinking flag and start timer
-    #         ai_thinking = True
-    #         ai_move_time = time.time()
-    #         message = "AI is thinking..."
-    #         message_timer = 120
-    #     elif ai_thinking and time.time() - ai_move_time >= 2.0:  # 2 second delay
-    #         # Make the move after the delay
-    #         ai_make_move()
+    if current_player == "Player2" and not ai_thinking:
+        ai_thinking = True
+        ai_move_start_time = time.time()
 
-    # If it's Player2's turn and not waiting for color choice, let AI make a move
-    if current_player == "Player2" and not move_animation:
-        if not ai_thinking:
-            # Set AI thinking flag and start timer
-            ai_thinking = True
-            ai_move_time = time.time()
-            message = "AI is thinking..."
-            message_timer = 120
-            print("AI started thinking")
-        elif ai_thinking and time.time() - ai_move_time >= 2.0:  # 2 second delay
-            # Make the move after the delay
-            print("AI ready to make move after delay")
-            ai_make_move()
+    # Delay AI move slightly to simulate thinking
+    if ai_thinking and time.time() - ai_move_start_time >= ai_bot.thinking_delay:
+        ai_make_move()
+        ai_thinking = False
 
     pygame.display.flip()
-    clock.tick(60)  # 60 FPS
+    clock.tick(60)
 
 pygame.quit()
