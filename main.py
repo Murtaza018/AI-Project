@@ -59,7 +59,7 @@ animation_start_time = 0
 animation_duration = 0.5  # seconds
 animation_card = None
 black_card_played = False
-
+has_drawn_card = False  # Flag to track if the current player has drawn a card this turn
 
 # Load fonts with better sizes
 pygame.font.init()
@@ -173,6 +173,26 @@ def draw_card(x, y, color, label, selected=False, clickable=False):
     
     return pygame.Rect(x, y, 84, 124)  # Return the card's rect for click detection
 
+# Draw a card back (for AI's cards)
+def draw_card_back(x, y):
+    # Card shadow
+    pygame.draw.rect(screen, (50, 50, 50, 100), (x+3, y+3, 84, 124), border_radius=14)
+    
+    # Card back
+    pygame.draw.rect(screen, (50, 50, 150), (x, y, 84, 124), border_radius=14)
+    
+    # Card border
+    pygame.draw.rect(screen, (0, 0, 0), (x, y, 84, 124), 2, border_radius=14)
+    
+    # UNO logo on back
+    pygame.draw.ellipse(screen, (200, 50, 50), (x+12, y+30, 60, 80))
+    pygame.draw.ellipse(screen, (0, 0, 0), (x+12, y+30, 60, 80), 2)
+    text = card_font.render("UNO", True, (255, 255, 255))
+    text_rect = text.get_rect(center=(x + 42, y + 70))
+    screen.blit(text, text_rect)
+    
+    return pygame.Rect(x, y, 84, 124)
+
 # Draw the deck of cards (face down)
 def draw_deck(x, y, clickable=True):
     # Draw multiple stacked cards to give depth
@@ -202,7 +222,7 @@ def draw_deck(x, y, clickable=True):
             screen.blit(text, text_rect)
     
     # Pulsating highlight if clickable and deck not empty
-    if clickable and len(deck) > 0:
+    if clickable and len(deck) > 0 and not has_drawn_card:
         pulse = (math.sin(pygame.time.get_ticks() * 0.005) + 1) / 2  # 0 to 1
         highlight_color = (255, 255, 255)
         border_width = int(2 + pulse * 2)
@@ -391,10 +411,13 @@ def apply_card_effect(card, player_idx):
 
 # Get the next player's turn
 def advance_turn():
-    global current_player_idx, current_player, message_timer, black_card_played
+    global current_player_idx, current_player, message_timer, black_card_played, has_drawn_card
     
     # Reset black card flag when advancing turn
     black_card_played = False
+    
+    # Reset the has_drawn_card flag for the new turn
+    has_drawn_card = False
     
     next_idx = (current_player_idx + game_direction) % len(active_players)
     
@@ -466,10 +489,17 @@ def play_card(card_idx):
 
 # Draw a card from the deck for the current player
 def draw_from_deck():
-    global message, message_timer, black_card_played
+    global message, message_timer, black_card_played, has_drawn_card
+    
+    # Check if player has already drawn a card this turn
+    if has_drawn_card:
+        message = "You can only draw one card per turn!"
+        message_timer = 120
+        return
     
     if len(deck) > 0:
-        # Add animation for drawing (could be implemented later)
+        # Mark that player has drawn a card this turn
+        has_drawn_card = True
         
         # Add card to player's hand
         new_card = deck.pop()
@@ -481,7 +511,8 @@ def draw_from_deck():
         # Check if the drawn card can be played
         if can_play_card(new_card):
             message += " - you can play it!"
-            # Don't advance turn if the card can be played - FIX #2
+            # Allow player to play the drawn card if possible
+            # But don't advance turn yet to give them a chance to play it
             return
         else:
             # If card can't be played and not after black card, advance turn
@@ -691,9 +722,6 @@ class AIBot:
         player = state['current_player'] if is_maximizing else state['opponent']
         moves = []
         
-        #  if is_maximizing else state['opponent']
-        moves = []
-        
         # Check for playable cards
         for i, card in enumerate(state['hands'][player]):
             if self._can_play_card(card, state['current_card']):
@@ -790,17 +818,24 @@ class AIBot:
 ai_bot = AIBot("AI")
 
 def ai_make_move():
-    global message, message_timer, ai_thinking, waiting_for_color_choice, current_card
+    global message, message_timer, ai_thinking, waiting_for_color_choice, current_card, has_drawn_card
 
     # Reset AI thinking flag
     ai_thinking = False
 
     # If waiting for color choice, handle that first
-    if waiting_for_color_choice and current_player == "AI":  # FIX #1: AI automatically chooses color
+    if waiting_for_color_choice and current_player == "AI":
         color = ai_bot.choose_color()
         message = f"AI chooses {color}"
         message_timer = 120
         set_card_color(color)
+        return
+
+    # Check if AI has already drawn a card this turn
+    if has_drawn_card and current_player == "AI":
+        message = "AI can only draw one card per turn"
+        message_timer = 120
+        advance_turn()
         return
 
     try:
@@ -839,8 +874,6 @@ def get_game_state():
         'deck': deck[:]
     }
 
-
-# In your game loop, ensure that ai_make_move is called appropriately when it's AI's turn
 # Game loop
 running = True
 clock = pygame.time.Clock()
@@ -940,12 +973,25 @@ while running:
     start_x = ((hand_width - 10) - ((len(current_hand) - 1) * card_spacing + 84)) // 2 if current_hand else (hand_width - 10) // 2 - 42
     
     card_rects = []
-    for i, card in enumerate(current_hand):
-        is_selected = (i == selected_card)
-        is_playable = can_play_card(card)
-        card_rect = draw_card(start_x + i * card_spacing, hand_y, card["color"], card["label"], 
-                             selected=is_selected, clickable=is_playable)
-        card_rects.append(card_rect)
+    
+    # Only show actual cards for Player1, show card backs for AI
+    if current_player == "Player1":
+        # Show Player1's cards normally when it's their turn
+        for i, card in enumerate(current_hand):
+            is_selected = (i == selected_card)
+            is_playable = can_play_card(card)
+            card_rect = draw_card(start_x + i * card_spacing, hand_y, card["color"], card["label"], 
+                               selected=is_selected, clickable=is_playable)
+            card_rects.append(card_rect)
+    else:
+        # For AI, show card backs
+        for i in range(len(current_hand)):
+            card_rect = draw_card_back(start_x + i * card_spacing, hand_y)
+            card_rects.append(card_rect)
+        
+        # Show count text
+        count_text = index_font.render(f"{len(current_hand)} cards", True, (0, 0, 0))
+        screen.blit(count_text, (hand_width/2 - count_text.get_width()/2, hand_y + 130))
     
     # Current card panel
     current_card_x = hand_width
@@ -973,8 +1019,9 @@ while running:
     deck_label_x = deck_x + (deck_area_width - 10) / 2 - deck_label.get_width() / 2
     screen.blit(deck_label, (deck_label_x, hand_bg_y + 10))
     
-    # Draw the draw deck
-    deck_rect = draw_deck(deck_x + (deck_area_width - 10) / 2 - 42, hand_y, clickable=True)
+    # Draw the draw deck - only clickable if it's Player1's turn and they haven't drawn a card yet
+    deck_rect = draw_deck(deck_x + (deck_area_width - 10) / 2 - 42, hand_y, 
+                        clickable=(current_player == "Player1" and not has_drawn_card))
     
     # Draw the current card (with animation if active)
     if move_animation and time.time() - animation_start_time < animation_duration:
@@ -1004,8 +1051,8 @@ while running:
         card_x = current_card_x + (card_area_width - 10) / 2 - 42  # Center the card
         draw_card(card_x, hand_y, current_card["color"], current_card["label"])
     
-    # Display color selection if waiting for choice
-    if waiting_for_color_choice and current_player == "Player1":  # FIX #1: Only show color selection for human player
+    # Display color selection if waiting for choice (only for Player1)
+    if waiting_for_color_choice and current_player == "Player1":
         color_buttons = draw_color_selection()
     
     # Display message if timer is active
@@ -1027,7 +1074,7 @@ while running:
         
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             # Check if waiting for color selection
-            if waiting_for_color_choice and current_player == "Player1":  # FIX #1: Only process color selection for human player
+            if waiting_for_color_choice and current_player == "Player1":
                 for button_rect, color in color_buttons:
                     if button_rect.collidepoint(event.pos):
                         set_card_color(color)
@@ -1048,7 +1095,7 @@ while running:
                             break
                     
                     # Check if player clicked on the draw deck
-                    if deck_rect.collidepoint(event.pos) and len(deck) > 0:
+                    if deck_rect.collidepoint(event.pos) and len(deck) > 0 and not has_drawn_card:
                         draw_from_deck()
         
         elif event.type == pygame.KEYDOWN:
@@ -1068,7 +1115,7 @@ while running:
             
             # Test draws
             elif event.key == pygame.K_d:
-                if current_player == "Player1":
+                if current_player == "Player1" and not has_drawn_card:
                     draw_from_deck()
             
             # Switch player for testing
