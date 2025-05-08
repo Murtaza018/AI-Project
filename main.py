@@ -30,14 +30,14 @@ COLORS = {
 # Player settings with improved aesthetics
 PLAYER_COLORS = {
     "Player1": (220, 50, 50),    # Deeper red
-    "Player2": (50, 80, 220),    # Deeper blue
+    "AI": (50, 80, 220),    # Deeper blue
     "Player3": (50, 180, 50),    # Deeper green
     "Player4": (220, 180, 40),   # Deeper yellow
 }
 
 PLAYER_GRADIENTS = {
     "Player1": [(255, 100, 100), (180, 30, 30)],  # Red gradient
-    "Player2": [(100, 150, 255), (30, 60, 180)],  # Blue gradient
+    "AI": [(100, 150, 255), (30, 60, 180)],  # Blue gradient
     "Player3": [(100, 230, 100), (30, 160, 30)],  # Green gradient
     "Player4": [(255, 230, 100), (200, 160, 30)], # Yellow gradient
 }
@@ -45,12 +45,12 @@ PLAYER_GRADIENTS = {
 # Game state variables
 players = {
     "Player1": {"symbol": "🔴", "pos": 1, "target_pos": (0, 0), "skip_turn": False},
-    "Player2": {"symbol": "🔵", "pos": 1, "target_pos": (0, 0), "skip_turn": False},
+    "AI": {"symbol": "🔵", "pos": 1, "target_pos": (0, 0), "skip_turn": False},
     "Player3": {"symbol": "🟢", "pos": 1, "target_pos": (0, 0), "skip_turn": False},
     "Player4": {"symbol": "🟡", "pos": 1, "target_pos": (0, 0), "skip_turn": False},
 }
 
-active_players = ["Player1", "Player2"]  # Can be expanded to include Player3 and Player4
+active_players = ["Player1", "AI"]  # Can be expanded to include Player3 and Player4
 current_player_idx = 0
 current_player = active_players[current_player_idx]
 game_direction = 1  # 1 for normal order, -1 for reversed
@@ -514,7 +514,7 @@ MAX_DEPTH = 3  # Depth of the search tree
 
 # Clean implementation of the AI Bot class with Minimax and Alpha-Beta Pruning
 class AIBot:
-    def __init__(self, player_name="Player2"):
+    def __init__(self, player_name="AI"):
         self.player_name = player_name
         self.thinking_delay = 1.0
         self.max_depth = 2  # Reduced depth for better performance
@@ -787,7 +787,7 @@ class AIBot:
         best_color = max(color_counts.items(), key=lambda x: x[1])[0] if any(color_counts.values()) else "Red"
         return best_color
 
-ai_bot = AIBot("Player2")
+ai_bot = AIBot("AI")
 
 def ai_make_move():
     global message, message_timer, ai_thinking, waiting_for_color_choice, current_card
@@ -796,7 +796,7 @@ def ai_make_move():
     ai_thinking = False
 
     # If waiting for color choice, handle that first
-    if waiting_for_color_choice and current_player == "Player2":  # FIX #1: AI automatically chooses color
+    if waiting_for_color_choice and current_player == "AI":  # FIX #1: AI automatically chooses color
         color = ai_bot.choose_color()
         message = f"AI chooses {color}"
         message_timer = 120
@@ -809,8 +809,8 @@ def ai_make_move():
 
         if best_move['type'] == 'play':
             # Additional safety check
-            if best_move['card_index'] < len(player_hands["Player2"]):
-                card = player_hands["Player2"][best_move['card_index']]
+            if best_move['card_index'] < len(player_hands["AI"]):
+                card = player_hands["AI"][best_move['card_index']]
                 message = f"AI plays {card['color']} {card['label']}"
                 message_timer = 120
                 play_card(best_move['card_index'])
@@ -833,7 +833,7 @@ def get_game_state():
     return {
         'hands': {
             'Player1': player_hands['Player1'][:],
-            'Player2': player_hands['Player2'][:]
+            'AI': player_hands['AI'][:]
         },
         'current_card': current_card.copy(),
         'deck': deck[:]
@@ -1081,8 +1081,8 @@ while running:
             elif event.key == pygame.K_ESCAPE:
                 running = False
 
-    # If it's Player2's turn and not waiting for color choice, let AI make a move
-    if current_player == "Player2" and not ai_thinking:
+    # If it's AI's turn and not waiting for color choice, let AI make a move
+    if current_player == "AI" and not ai_thinking:
         ai_thinking = True
         ai_move_start_time = time.time()
 
