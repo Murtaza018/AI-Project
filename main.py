@@ -60,6 +60,7 @@ animation_duration = 0.5  # seconds
 animation_card = None
 black_card_played = False
 has_drawn_card = False  # Flag to track if the current player has drawn a card this turn
+can_play_drawn_card = False  # Flag to track if the drawn card can be played
 
 # Load fonts with better sizes
 pygame.font.init()
@@ -222,7 +223,7 @@ def draw_deck(x, y, clickable=True):
             screen.blit(text, text_rect)
     
     # Pulsating highlight if clickable and deck not empty
-    if clickable and len(deck) > 0 and not has_drawn_card:
+    if clickable and len(deck) > 0:
         pulse = (math.sin(pygame.time.get_ticks() * 0.005) + 1) / 2  # 0 to 1
         highlight_color = (255, 255, 255)
         border_width = int(2 + pulse * 2)
@@ -411,13 +412,14 @@ def apply_card_effect(card, player_idx):
 
 # Get the next player's turn
 def advance_turn():
-    global current_player_idx, current_player, message_timer, black_card_played, has_drawn_card
+    global current_player_idx, current_player, message_timer, black_card_played, has_drawn_card, can_play_drawn_card
     
     # Reset black card flag when advancing turn
     black_card_played = False
     
     # Reset the has_drawn_card flag for the new turn
     has_drawn_card = False
+    can_play_drawn_card = False
     
     next_idx = (current_player_idx + game_direction) % len(active_players)
     
@@ -433,7 +435,7 @@ def advance_turn():
 
 # Play a selected card from the player's hand
 def play_card(card_idx):
-    global current_card, move_animation, animation_start_time, animation_card, message_timer, waiting_for_color_choice, black_card_played
+    global current_card, move_animation, animation_start_time, animation_card, message_timer, waiting_for_color_choice, black_card_played, has_drawn_card, can_play_drawn_card
     
     card = player_hands[current_player][card_idx]
     
@@ -489,12 +491,15 @@ def play_card(card_idx):
 
 # Draw a card from the deck for the current player
 def draw_from_deck():
-    global message, message_timer, black_card_played, has_drawn_card
+    global message, message_timer, black_card_played, has_drawn_card, can_play_drawn_card
     
     # Check if player has already drawn a card this turn
     if has_drawn_card:
-        message = "You can only draw one card per turn!"
+        message = "Picking cards again not allowed!"
         message_timer = 120
+        # End the player's turn if they try to draw again
+        if not black_card_played:
+            advance_turn()
         return
     
     if len(deck) > 0:
@@ -511,6 +516,7 @@ def draw_from_deck():
         # Check if the drawn card can be played
         if can_play_card(new_card):
             message += " - you can play it!"
+            can_play_drawn_card = True
             # Allow player to play the drawn card if possible
             # But don't advance turn yet to give them a chance to play it
             return
@@ -534,7 +540,6 @@ def set_card_color(color):
     message_timer = 120
 
 # Global variables
-global message, message_timer, ai_thinking, waiting_for_color_choice
 message = ""
 message_timer = 0
 ai_thinking = False
@@ -833,7 +838,20 @@ def ai_make_move():
 
     # Check if AI has already drawn a card this turn
     if has_drawn_card and current_player == "AI":
-        message = "AI can only draw one card per turn"
+        # Check if AI can play the card it just drew (the last card in its hand)
+        if len(player_hands["AI"]) > 0:  # Make sure AI has cards
+            last_card_index = len(player_hands["AI"]) - 1
+            last_card = player_hands["AI"][last_card_index]
+            
+            # Only play the card if it's valid according to UNO rules
+            if can_play_card(last_card):
+                message = f"AI plays the drawn card: {last_card['color']} {last_card['label']}"
+                message_timer = 120
+                play_card(last_card_index)
+                return
+        
+        # If AI can't play the drawn card, end its turn
+        message = "AI ends its turn"
         message_timer = 120
         advance_turn()
         return
@@ -862,7 +880,7 @@ def ai_make_move():
         message = "AI draws a card (error)"
         message_timer = 120
         draw_from_deck()
-
+        
 # Function to convert the current game state into a dictionary
 def get_game_state():
     return {
@@ -1019,9 +1037,9 @@ while running:
     deck_label_x = deck_x + (deck_area_width - 10) / 2 - deck_label.get_width() / 2
     screen.blit(deck_label, (deck_label_x, hand_bg_y + 10))
     
-    # Draw the draw deck - only clickable if it's Player1's turn and they haven't drawn a card yet
-    deck_rect = draw_deck(deck_x + (deck_area_width - 10) / 2 - 42, hand_y, 
-                        clickable=(current_player == "Player1" and not has_drawn_card))
+    # Draw the draw deck - only clickable if it's Player1's turn
+    deck_rect = draw_deck(deck_x + (deck_area_width - 10) / 2 - 42, hand_y,
+                    clickable=(current_player == "Player1"))
     
     # Draw the current card (with animation if active)
     if move_animation and time.time() - animation_start_time < animation_duration:
@@ -1095,7 +1113,7 @@ while running:
                             break
                     
                     # Check if player clicked on the draw deck
-                    if deck_rect.collidepoint(event.pos) and len(deck) > 0 and not has_drawn_card:
+                    if deck_rect.collidepoint(event.pos) and len(deck) > 0:
                         draw_from_deck()
         
         elif event.type == pygame.KEYDOWN:
@@ -1115,7 +1133,7 @@ while running:
             
             # Test draws
             elif event.key == pygame.K_d:
-                if current_player == "Player1" and not has_drawn_card:
+                if current_player == "Player1":
                     draw_from_deck()
             
             # Switch player for testing
